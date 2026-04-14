@@ -81,12 +81,12 @@ function intrax_render_price_manager() {
                     $sql = $wpdb->prepare("
                         UPDATE {$wpdb->postmeta} pm_target
                         INNER JOIN {$wpdb->posts} p ON pm_target.post_id = p.ID
-                        INNER JOIN {$wpdb->postmeta} pm_syscom ON p.ID = pm_syscom.post_id
+                        INNER JOIN {$wpdb->postmeta} pm_syscom ON p.ID = pm_syscom.post_id AND pm_syscom.meta_key = '_precio_original_syscom'
+                        INNER JOIN {$wpdb->postmeta} pm_regular ON p.ID = pm_regular.post_id AND pm_regular.meta_key = '_regular_price'
                         SET pm_target.meta_value = FORMAT(CAST(pm_syscom.meta_value AS DECIMAL(15,4)) * %s, 2, 'en_US')
                         WHERE p.post_status = 'draft'
                         AND pm_target.meta_key = %s
-                        AND pm_syscom.meta_key = '_precio_original_syscom'
-                        AND CAST(pm_syscom.meta_value AS DECIMAL(15,4)) BETWEEN %s AND %s
+                        AND CAST(pm_regular.meta_value AS DECIMAL(15,4)) BETWEEN %s AND %s
                     ", $current_multiplier, $key, $min, $max);
 
                     $affected = $wpdb->query($sql);
