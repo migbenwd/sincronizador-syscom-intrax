@@ -38,17 +38,7 @@ function intrax_render_price_manager() {
                 $min = number_format(floatval($row['min']), 2, '.', '');
                 $max = number_format(floatval($row['max']), 2, '.', '');
 
-                // -------------------------------------------------------
-                // FÓRMULA CORREGIDA:
-                // Los porcentajes de Intrax son MARKUP sobre costo.
-                // precio = costo × (1 + margen / 100)
-                //
-                // Antes (incorrecto):  multiplicador = margen / 100
-                //   ej. 160% → 1.60  →  costo × 1.60
-                //
-                // Ahora (correcto):    multiplicador = 1 + margen / 100
-                //   ej. 160% → 2.60  →  costo × 2.60
-                // -------------------------------------------------------
+
                 $multiplier_publico     = number_format(1 + (floatval($row['venta_publico']) / 100), 4, '.', '');
                 $multiplier_integrador  = number_format(1 + (floatval($row['descuento_integrador']) / 100), 4, '.', '');
 
@@ -68,47 +58,58 @@ function intrax_render_price_manager() {
                 }
 
                 // Mapa de meta_keys y sus multiplicadores correspondientes
-                $price_updates = [
-                    '_regular_price' => $multiplier_publico,
-                    '_price'         => $multiplier_publico,
-                    'wholesale_customer_wholesale_price' => $multiplier_integrador,
-                ];
+  				
+			  
+				$price_updates = [
+					'_regular_price'                     => $multiplier_publico,
+					'wholesale_customer_wholesale_price' => $multiplier_integrador,
+				];
+				
+							
+				$skus_report = []; // Array para recolectar SKUs
 				
 				
 				foreach ($price_updates as $key => $current_multiplier) {
-                    // Actualización masiva de precios via SQL directo
-                    // precio_final = costo × multiplicador  (donde multiplicador = 1 + margen/100)
-                    $sql = $wpdb->prepare("
-                        UPDATE {$wpdb->postmeta} pm_target
-                        INNER JOIN {$wpdb->posts} p ON pm_target.post_id = p.ID
-                        INNER JOIN {$wpdb->postmeta} pm_syscom ON p.ID = pm_syscom.post_id AND pm_syscom.meta_key = '_precio_original_syscom'
-                        INNER JOIN {$wpdb->postmeta} pm_regular ON p.ID = pm_regular.post_id AND pm_regular.meta_key = '_regular_price'
-                        SET pm_target.meta_value = FORMAT(CAST(pm_syscom.meta_value AS DECIMAL(15,4)) * %s, 2, 'en_US')
-                        WHERE p.post_status = 'draft'
-                        AND pm_target.meta_key = %s
-                        AND CAST(pm_regular.meta_value AS DECIMAL(15,4)) BETWEEN %s AND %s
-                    ", $current_multiplier, $key, $min, $max);
+    
+					
+					$products_found = $wpdb->get_results($wpdb->prepare("
+					SELECT p.ID, pm_sku.meta_value as sku, pm_reg.meta_value as precio_actual
+					FROM {$wpdb->posts} p
+					INNER JOIN {$wpdb->postmeta} pm_reg ON p.ID = pm_reg.post_id
+					LEFT JOIN {$wpdb->postmeta} pm_sku ON p.ID = pm_sku.post_id AND pm_sku.meta_key = '_sku'
+					WHERE p.post_status = 'draft'
+					AND pm_reg.meta_key = '_regular_price'
+					AND CAST(pm_reg.meta_value AS DECIMAL(20,4)) BETWEEN %f AND %f
 
-                    $affected = $wpdb->query($sql);
+					", $min, $max));
+					
+				$sql = $wpdb->prepare("
+					UPDATE {$wpdb->postmeta} pm_target
+					INNER JOIN {$wpdb->posts} p ON pm_target.post_id = p.ID
+					INNER JOIN {$wpdb->postmeta} pm_syscom ON p.ID = pm_syscom.post_id
+					SET pm_target.meta_value = FORMAT(CAST(pm_syscom.meta_value AS DECIMAL(20,4)) * %s, 2, 'en_US')
+					WHERE p.post_status = 'draft'
+					AND pm_target.meta_key = %s
+					AND CAST(pm_syscom.meta_value AS DECIMAL(20,4)) BETWEEN %f AND %f
+				", $current_multiplier, $key, $min, $max);				
 
-                    // Registro de auditoría (una sola vez por rango, en _price)
-                    if ($affected > 0 && $key === '_price') {
-                        $post_ids = $wpdb->get_col($wpdb->prepare("
-                            SELECT p.ID
-                            FROM {$wpdb->posts} p
-                            INNER JOIN {$wpdb->postmeta} pm_syscom ON p.ID = pm_syscom.post_id
-                            WHERE p.post_status = 'draft'
-                            AND pm_syscom.meta_key = '_precio_original_syscom'
-                            AND CAST(pm_syscom.meta_value AS DECIMAL(15,4)) BETWEEN %s AND %s
-                        ", $min, $max));
+				$affected = $wpdb->query($sql);
 
-                        foreach ($post_ids as $post_id) {
-                            update_post_meta($post_id, 'cambio_en_rango_precio_desde_modulo_admin', date('Y-m-d H:i:s'));
-                        }
-
-                        $total_affected += $affected;
-                    }
-                }
+				$skus_report[] = [
+					'rango' => "$min - $max",
+					'productos' => $products_found,
+					'products_found' => $products_found,
+					'products_actualizados' => $sql
+				];
+					
+				foreach ($products_found as $prod) {
+				update_post_meta($prod->ID, 'cambio_en_rango_precio_desde_modulo_admin', date('Y-m-d H:i:s'));
+				}
+					
+				$total_affected += $affected;
+				
+			}				
+	
 
 			
 				
@@ -116,9 +117,31 @@ function intrax_render_price_manager() {
 				
             }
 
+
+			if (!empty($skus_report)) {
+				echo "<script>
+					console.group('%c🔍 DETALLE DE ACTUALIZACIÓN POR SKU', 'color: #2563eb; font-weight: bold; font-size: 14px;');
+					const reportData = " . json_encode($skus_report) . ";
+					reportData.forEach(r => {
+						console.log(`%cRango: \${r.rango}`, 'background: #2563eb; color: #fff; padding: 2px 5px; border-radius: 3px;');
+						console.table(r.productos);
+						console.log(r.products_found);
+						console.log(r.products_actualizados);
+
+					});
+					console.groupEnd();
+				</script>";
+			}			
+			
+			
+			
             wp_cache_flush();
-            echo '<div class="updated notice is-dismissible"><p>🚀 <strong>Éxito:</strong> Se actualizaron <strong>' . $total_affected . '</strong> productos sin redondeos.</p></div>';
-        }
+            echo '<div class="updated notice is-dismissible"><p>🚀 <strong>Éxito:</strong> Se actualizaron <strong>' . $total_affected . '</strong> productos sin redondeos.</p>				</div>';
+        
+		}
+		
+		
+		
     }
 
     // Cargar datos de la tabla
