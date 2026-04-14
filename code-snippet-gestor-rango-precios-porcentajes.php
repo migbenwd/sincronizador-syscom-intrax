@@ -1,4 +1,3 @@
-<?php
 
 /**
  * Plugin Name: Gestor de Precios INTRAX (Versión Ultra-Precisión)
@@ -70,20 +69,35 @@ function intrax_render_price_manager() {
 				
 				
 				foreach ($price_updates as $key => $current_multiplier) {
-    
-					
+    									
 					$products_found = $wpdb->get_results($wpdb->prepare("
-					SELECT p.ID, pm_sku.meta_value as sku, pm_reg.meta_value as precio_actual
+					SELECT 
+						p.ID, 
+						pm_sku.meta_value as sku, 
+						pm_syscom_value.meta_value as costo_original_syscom,
+						pm_reg.meta_value as precio_actual,
+						FORMAT(CAST(pm_syscom.meta_value AS DECIMAL(20,4)) * %f, 2, 'en_US') as precio_nuevo
 					FROM {$wpdb->posts} p
 					INNER JOIN {$wpdb->postmeta} pm_reg ON p.ID = pm_reg.post_id
+					INNER JOIN {$wpdb->postmeta} pm_syscom ON p.ID = pm_syscom.post_id
+					LEFT JOIN {$wpdb->postmeta} pm_syscom_value ON p.ID = pm_syscom_value.post_id AND pm_syscom_value.meta_key = '_precio_original_syscom'
 					LEFT JOIN {$wpdb->postmeta} pm_sku ON p.ID = pm_sku.post_id AND pm_sku.meta_key = '_sku'
 					WHERE p.post_status = 'draft'
-					AND pm_reg.meta_key = '_regular_price'
-					AND CAST(pm_reg.meta_value AS DECIMAL(20,4)) BETWEEN %f AND %f
-
-					", $min, $max));
+					AND pm_reg.meta_key = %s
+					AND CAST(pm_syscom.meta_value AS DECIMAL(20,4)) BETWEEN %f AND %f
+				", $current_multiplier, $key, $min, $max));			
 					
-				$sql = $wpdb->prepare("
+					
+					$skus_report[] = [
+						'rango'          => "$min - $max",
+						'campo_afectado' => $key,
+						'productos'      => $products_found,
+						'current_multiplier' => $current_multiplier,
+						'sql_select'     => "SELECT ejecutado para $key" // Para evitar el error de undefined en JS
+					];		
+					
+					
+					$sql = $wpdb->prepare("
 					UPDATE {$wpdb->postmeta} pm_target
 					INNER JOIN {$wpdb->posts} p ON pm_target.post_id = p.ID
 					INNER JOIN {$wpdb->postmeta} pm_syscom ON p.ID = pm_syscom.post_id
@@ -95,46 +109,35 @@ function intrax_render_price_manager() {
 
 				$affected = $wpdb->query($sql);
 
-				$skus_report[] = [
-					'rango' => "$min - $max",
-					'productos' => $products_found,
-					'products_found' => $products_found,
-					'products_actualizados' => $sql
-				];
+			
+				
 					
 				foreach ($products_found as $prod) {
-				update_post_meta($prod->ID, 'cambio_en_rango_precio_desde_modulo_admin', date('Y-m-d H:i:s'));
+				update_post_meta($prod->ID, 'cambio_precio_en_modulo_rango_precio', date('Y-m-d H:i:s'));
 				}
 					
 				$total_affected += $affected;
 				
 			}				
 	
-
-			
-				
-				
 				
             }
 
 
+			// 4. IMPRIMIR CONSOLE LOG (Fuera del bucle de updates, pero dentro del if de save)
 			if (!empty($skus_report)) {
 				echo "<script>
-					console.group('%c🔍 DETALLE DE ACTUALIZACIÓN POR SKU', 'color: #2563eb; font-weight: bold; font-size: 14px;');
+					console.group('%c🔍 DETALLE DE ACTUALIZACIÓN', 'color: white; background: #2563eb; padding: 4px; font-weight: bold;');
 					const reportData = " . json_encode($skus_report) . ";
 					reportData.forEach(r => {
-						console.log(`%cRango: \${r.rango}`, 'background: #2563eb; color: #fff; padding: 2px 5px; border-radius: 3px;');
-						console.table(r.productos);
-						console.log(r.products_found);
-						console.log(r.products_actualizados);
-
+			console.log(`%c Rango: \${r.rango} | campo_afectado: \${r.campo_afectado} | sql_select: \${r.sql_select} | `, 'background: #1e293b; color: #38bdf8; font-weight: bold;');
+						console.table(r.productos); 
+						
 					});
 					console.groupEnd();
 				</script>";
-			}			
-			
-			
-			
+			}
+
             wp_cache_flush();
             echo '<div class="updated notice is-dismissible"><p>🚀 <strong>Éxito:</strong> Se actualizaron <strong>' . $total_affected . '</strong> productos sin redondeos.</p>				</div>';
         
