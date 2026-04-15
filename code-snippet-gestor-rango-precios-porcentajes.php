@@ -5,6 +5,7 @@
  * Description: Actualización masiva con SQL directo. Fórmula corregida: costo × (1 + margen/100).
  */
 
+
 add_action('admin_menu', function() {
     add_submenu_page(
         null,
