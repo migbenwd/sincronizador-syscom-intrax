@@ -1,3 +1,4 @@
+<?php
 
 /**
  * Plugin Name: Gestor de Precios INTRAX (Versión Ultra-Precisión)
