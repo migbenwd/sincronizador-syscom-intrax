@@ -1,5 +1,7 @@
 <?php
 
+
+
 /**
  * Plugin Name: Gestor de Precios INTRAX (Versión Ultra-Precisión)
  * Description: Actualización masiva con SQL directo. Fórmula corregida: costo × (1 + margen/100).
@@ -19,6 +21,12 @@ add_action('admin_menu', function() {
 function intrax_render_price_manager() {
     global $wpdb;
     $table_name = $wpdb->prefix . 'intrax_precios';
+	$token = get_option('sws_syscom_token', '');
+	
+	$iva_multiplicador = 1.16;
+	$otro_factor = 0.96;
+	$reporte_agrupado = []; // Usaremos esta variable para acumular todo
+
 
     // --- PROCESAR ELIMINACIÓN ---
     if (isset($_POST['delete_row_id'])) {
@@ -32,115 +40,251 @@ function intrax_render_price_manager() {
         $changed_ranges = json_decode(stripslashes($_POST['intrax_json_data']), true);
 
         if (is_array($changed_ranges)) {
-            $total_affected = 0;
 
             foreach ($changed_ranges as $row) {
-                $min = number_format(floatval($row['min']), 2, '.', '');
-                $max = number_format(floatval($row['max']), 2, '.', '');
+				
+				
+				$min = number_format(floatval($row['min']), 2, '.', '');
+				$max = number_format(floatval($row['max']), 2, '.', '');
 
 
-                $multiplier_publico     = number_format(1 + (floatval($row['venta_publico']) / 100), 4, '.', '');
-                $multiplier_integrador  = number_format(1 + (floatval($row['descuento_integrador']) / 100), 4, '.', '');
+				$multiplier_publico     = number_format(1 + (floatval($row['venta_publico']) / 100), 4, '.', '');
+				$multiplier_integrador  = number_format(1 + (floatval($row['descuento_integrador']) / 100), 4, '.', '');
 
-                $id = intval($row['id']);
+				$id = intval($row['id']);
 
-                $save_data = [
-                    'desde'                => $min,
-                    'hasta'                => $max,
-                    'venta_publico'        => $multiplier_publico,
-                    'descuento_integrador' => $multiplier_integrador,
-                ];
+				$save_data = [
+					'desde'                => $min,
+					'hasta'                => $max,
+					'venta_publico'        => $multiplier_publico,
+					'descuento_integrador' => $multiplier_integrador,
+				];
 
-                if ($id > 1000000000) {
-                    $wpdb->insert($table_name, $save_data);
-                } else {
-                    $wpdb->update($table_name, $save_data, array('id' => $id));
-                }
-
-                // Mapa de meta_keys y sus multiplicadores correspondientes
-  				
+				if ($id > 1000000000) {
+					$wpdb->insert($table_name, $save_data);
+				} else {
+					$wpdb->update($table_name, $save_data, array('id' => $id));
+				}
 			  
 				$price_updates = [
 					'_regular_price'                     => $multiplier_publico,
 					'wholesale_customer_wholesale_price' => $multiplier_integrador,
 				];
 				
-							
-				$skus_report = []; // Array para recolectar SKUs
-				
-				
-				foreach ($price_updates as $key => $current_multiplier) {
-    									
-					$products_found = $wpdb->get_results($wpdb->prepare("
+
+				$products_found = $wpdb->get_results($wpdb->prepare("
 					SELECT 
 						p.ID, 
-						pm_sku.meta_value as sku, 
-						pm_syscom_value.meta_value as costo_original_syscom,
-						pm_reg.meta_value as precio_actual,
-						FORMAT(CAST(pm_syscom.meta_value AS DECIMAL(20,4)) * %f, 2, 'en_US') as precio_nuevo
+						pm_sku.meta_value as sku,
+						pm_reg.meta_value as precio_actual
 					FROM {$wpdb->posts} p
 					INNER JOIN {$wpdb->postmeta} pm_reg ON p.ID = pm_reg.post_id
-					INNER JOIN {$wpdb->postmeta} pm_syscom ON p.ID = pm_syscom.post_id
-					LEFT JOIN {$wpdb->postmeta} pm_syscom_value ON p.ID = pm_syscom_value.post_id AND pm_syscom_value.meta_key = '_precio_original_syscom'
+					INNER JOIN {$wpdb->postmeta} pm_syscom_tag ON p.ID = pm_syscom_tag.post_id
 					LEFT JOIN {$wpdb->postmeta} pm_sku ON p.ID = pm_sku.post_id AND pm_sku.meta_key = '_sku'
-					WHERE p.post_status = 'draft'
-					AND pm_reg.meta_key = %s
-					AND CAST(pm_syscom.meta_value AS DECIMAL(20,4)) BETWEEN %f AND %f
-				", $current_multiplier, $key, $min, $max));			
-					
-					
-					$skus_report[] = [
-						'rango'          => "$min - $max",
-						'campo_afectado' => $key,
-						'productos'      => $products_found,
-						'current_multiplier' => $current_multiplier,
-						'sql_select'     => "SELECT ejecutado para $key" // Para evitar el error de undefined en JS
-					];		
-					
-					
-					$sql = $wpdb->prepare("
-					UPDATE {$wpdb->postmeta} pm_target
-					INNER JOIN {$wpdb->posts} p ON pm_target.post_id = p.ID
-					INNER JOIN {$wpdb->postmeta} pm_syscom ON p.ID = pm_syscom.post_id
-					SET pm_target.meta_value = FORMAT(CAST(pm_syscom.meta_value AS DECIMAL(20,4)) * %s, 2, 'en_US')
-					WHERE p.post_status = 'draft'
-					AND pm_target.meta_key = %s
-					AND CAST(pm_syscom.meta_value AS DECIMAL(20,4)) BETWEEN %f AND %f
-				", $current_multiplier, $key, $min, $max);				
+					WHERE p.post_type = 'product' 
+					AND p.post_status = 'draft' 
+					AND pm_reg.meta_key = '_regular_price'
+					AND pm_syscom_tag.meta_key = '_producto_syscom_api'
+					AND CAST(pm_reg.meta_value AS DECIMAL(20,2)) BETWEEN %f AND %f
+				", $min, $max));
 
-				$affected = $wpdb->query($sql);
-
-			
-				
+				if ($products_found) {
 					
-				foreach ($products_found as $prod) {
-				update_post_meta($prod->ID, 'cambio_precio_en_modulo_rango_precio', date('Y-m-d H:i:s'));
+					
+					// Extraemos solo los valores de la columna 'sku' del array de objetos
+					$lista_skus = wp_list_pluck($products_found, 'sku');
+
+					// Limpiamos posibles valores vacíos y los unimos por coma
+					$skus_texto = implode(', ', array_filter($lista_skus));
+
+					$reporte_agrupado['auditoria'][] = [
+						'rango' => "$min - $max",
+						'borradores_encontrados' => count($products_found),
+						'skus_detectados' => $skus_texto // Aquí se guardan los nombres de los productos/modelos
+					];
+					
+					foreach ($price_updates as $key => $current_multiplier) {
+						
+							
+						foreach ($products_found as $prod) {
+					
+							$sku = $prod->sku;
+							$precio_descuento = 0; 
+
+							if (!empty($sku)) {
+
+								$tipo_cambio = 1; // Valor por defecto
+								$response_cambio = wp_remote_get("https://developers.syscom.mx/api/v1/tipocambio", [
+									'headers' => [
+										'Authorization' => 'Bearer ' . $token,
+										'Accept'        => 'application/json',
+									]
+								]);
+
+								if (!is_wp_error($response_cambio) && wp_remote_retrieve_response_code($response_cambio) === 200) {
+									$data_cambio = json_decode(wp_remote_retrieve_body($response_cambio), true);
+									$tipo_cambio = isset($data_cambio['normal']) ? floatval($data_cambio['normal']) : 1;
+								}						
+
+								$api_url = "https://developers.syscom.mx/api/v1/productos?busqueda=" . urlencode($sku);
+
+									$response_descuento = wp_remote_get($api_url, [
+										'headers' => [
+											'Authorization' => 'Bearer ' . $token, // Agregado espacio después de Bearer
+											'Accept'        => 'application/json',
+										],
+										'timeout' => 15
+									]);
+
+									if (!is_wp_error($response_descuento) && wp_remote_retrieve_response_code($response_descuento) === 200) {
+
+										$body = wp_remote_retrieve_body($response_descuento);
+										$api_data = json_decode($body, true);
+
+										if ($api_data && isset($api_data['productos']) && is_array($api_data['productos'])) {
+
+											$encontrado_exacto = false;
+
+											foreach ($api_data['productos'] as $item) {
+												// 1. Normalización estricta para asegurar el match
+
+												// $precio_desx = $item['precios']['precio_descuento'];
+												$garantia = $item['garantia'];
+												$modelo_api = strtoupper(trim($item['modelo']));
+												$sku_local  = strtoupper(trim($sku));
+
+												// 2. COMPARACIÓN ESTRICTA
+												if ($modelo_api === $sku_local) {
+
+													$precio_base = floatval($item['precios']['precio_descuento']);
+
+													$precio_final = $precio_base * $iva_multiplicador * $otro_factor * $current_multiplier * $tipo_cambio;
+ 													
+													$precio_final_a_tienda = number_format($precio_final, 2, '.', '');
+													
+													$precio_descuento = $precio_final; 
+													$encontrado_exacto = true;
+
+													$reporte_update[] = [
+														'key' => $key,
+														'SKU' => $sku,
+														'Precio Api' => $precio_base,
+														'tipo_cambio' => $tipo_cambio,
+														'IVA' => $iva_multiplicador,
+														'OTRO FACTOR' => $otro_factor,
+														'Porcentaje' => $current_multiplier,
+														'Precio FINAL' => $precio_final_a_tienda,
+														'Resultado' => 'Actualizado ✅'
+													];
+													
+													
+													
+													
+													break;								
+
+
+												}
+											}
+
+											// 3. SEGURIDAD: Si no hubo match exacto en la lista, el precio es 0
+											if (!$encontrado_exacto) {
+												$precio_descuento = 0;
+											}
+										}
+									
+									} else {
+										// Si la API falla (401, 404, etc.), aseguramos que el precio sea 0
+										$precio_descuento = 0;
+									}
+
+
+							}
+
+
+							if ($encontrado_exacto && $precio_descuento > 0) {
+
+								$precio_formateado = number_format($precio_descuento, 2, '.', '');
+
+									// 1. LIMPIEZA DE PRECIOS (Solo el de oferta para no bloquear)
+									$wpdb->query($wpdb->prepare("
+										UPDATE {$wpdb->postmeta} 
+										SET meta_value = '' 
+										WHERE post_id = %d AND meta_key = '_sale_price'
+									", $prod->ID));
+
+									// 2. ACTUALIZACIÓN DE LA LLAVE ESPECÍFICA ($key)
+									// Esto guarda el valor en el campo que corresponde (Público o Mayoreo)
+									$wpdb->query($wpdb->prepare("
+										UPDATE {$wpdb->postmeta} 
+										SET meta_value = %s 
+										WHERE post_id = %d AND meta_key = %s
+									", $precio_formateado, $prod->ID, $key));
+
+									// 3. CONDICIONAL PARA EL PRECIO ACTIVO (_price)
+									// CORRECCIÓN: Solo actualizamos '_price' si estamos editando el precio público
+									if ($key === '_regular_price') {
+										$wpdb->query($wpdb->prepare("
+											UPDATE {$wpdb->postmeta} 
+											SET meta_value = %s 
+											WHERE post_id = %d AND meta_key = '_price'
+										", $precio_formateado, $prod->ID));
+									}
+
+
+
+
+
+									$producto_actualizado = true;
+									$producto_actualizado_con_exito = true; // Marcamos que el producto se tocó
+
+
+							}
+
+
+							update_post_meta($prod->ID, 'cambio_precio_en_modulo_rango_precio', date('Y-m-d H:i:s'));
+
+							if ($producto_actualizado) {
+								$total_productos_tocados++;
+							}
+						
+						
+						}
+						
+						// --- HERE:
+						// 
+						
+						
+					}
+					
+					
 				}
-					
-				$total_affected += $affected;
 				
-			}				
-	
+				
 				
             }
 
-
-			// 4. IMPRIMIR CONSOLE LOG (Fuera del bucle de updates, pero dentro del if de save)
-			if (!empty($skus_report)) {
+			if (!empty($reporte_agrupado['auditoria'])) {
 				echo "<script>
-					console.group('%c🔍 DETALLE DE ACTUALIZACIÓN', 'color: white; background: #2563eb; padding: 4px; font-weight: bold;');
-					const reportData = " . json_encode($skus_report) . ";
-					reportData.forEach(r => {
-			console.log(`%c Rango: \${r.rango} | campo_afectado: \${r.campo_afectado} | sql_select: \${r.sql_select} | `, 'background: #1e293b; color: #38bdf8; font-weight: bold;');
-						console.table(r.productos); 
-						
-					});
-					console.groupEnd();
+				
+				console.group('%c🔍 SKUS SELECT SQL', 'color: black; background: #00ffff; padding: 10px; font-weight: bold;');
+				const reportAuditoria = " . json_encode($reporte_agrupado['auditoria']) . ";
+				console.table(reportAuditoria);
+				console.groupEnd();
+				
+				console.group('%c🔍 UPDATES SQL', 'color: violet; background: green; padding: 10px; font-weight: bold;');
+				const reportUPDATE = " . json_encode($reporte_update) . ";
+				console.table(reportUPDATE);
+				console.groupEnd();
+				
+
+				
+
 				</script>";
+				
 			}
 
             wp_cache_flush();
-            echo '<div class="updated notice is-dismissible"><p>🚀 <strong>Éxito:</strong> Se actualizaron <strong>' . $total_affected . '</strong> productos sin redondeos.</p>				</div>';
+        echo '<div class="updated notice is-dismissible"><p>🚀 <strong>Éxito:</strong> Se actualizaron <strong>' . $total_productos_tocados . '</strong> productos sin redondeos.</p>		</div>';
         
 		}
 		
