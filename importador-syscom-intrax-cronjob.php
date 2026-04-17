@@ -260,8 +260,8 @@ function procesar_batch_woocommerce($url_API_woo, $ck_API_woo, $cs_API_woo, $ite
                     
                 ]
             ];
-            
             */
+            
 
             
 
@@ -342,6 +342,7 @@ function procesar_batch_woocommerce($url_API_woo, $ck_API_woo, $cs_API_woo, $ite
             // aunque no actualicemos el precio o el stock en WooCommerce. Esto garantiza que la info sea fresca.
            
             $meta_data[] = ['key' => '_precio_original_syscom', 'value' => $precio_syscom];
+            $meta_data[] = ['key' => '_producto_syscom_api', 'value' => 'yes'];
 
             // MODIFICACIÓN: asignamos el precio de  integrador a la metadata para tener un histórico, aunque no haya cambios en el precio público.
             
