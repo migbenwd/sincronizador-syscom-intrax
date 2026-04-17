@@ -29,6 +29,15 @@ $cs_API_woo = 'cs_b7eb8a076de147e05507d2596e05d7bf18efa93b';
 print("\n");
 status_message("CRON JOB INTRAX: " . date("Y-m-d h:i:sa"));
 
+
+// ====================================================================================
+// Configuración de Factores INTRAX
+// ====================================================================================
+
+$otro_factor = 0.96; // Definición global
+$iva_multiplicador = 1.16;
+
+
 // --------------TESTER PARAMS
 
 /*
@@ -37,6 +46,7 @@ $parametro_api_rest = [
 ];  // 6 productos
 
 */
+
 
 $parametro_api_rest = [
 'marca=westerndigitalwd&categoria=1340',
@@ -189,6 +199,9 @@ function procesar_batch_woocommerce($url_API_woo, $ck_API_woo, $cs_API_woo, $ite
     $procesados = 0;
 
     foreach ($items_origin as $product) {
+
+
+        global $otro_factor; // Aseguramos acceso a la variable global dentro de la función
         
         // =========================================================================
         // 1. LÓGICA DE SKU (MODELO)
@@ -307,11 +320,14 @@ function procesar_batch_woocommerce($url_API_woo, $ck_API_woo, $cs_API_woo, $ite
                     print("\n");
                     status_message("CAMBIO PRECIO ($sku): $precio_actual_web -> $precio_final_calculado");
                     print("\n");
-                    status_message("precio syscom: " . $precio_syscom);
-                    status_message("tipo de cambio: " . $tipo_cambio);
-                    print("\n");
-                    status_message("precio_base_local ó convertido: " . $markup->precio_convertido);
                     status_message("rango de precio: " . $rango_precio);
+                    print("\n");
+                    status_message("tipo de cambio: " . $tipo_cambio);
+                    status_message("otro factor: " . $otro_factor);
+                    print("\n");
+                    status_message("precio syscom: " . $precio_syscom);
+                    status_message("precio convertido: " . $markup->precio_convertido);
+                    print("\n");
                     status_message("markup venta publico: " . $markup->venta_publico);
                     status_message("markup venta integrador: " . $markup->integrador);
                     print("\n");
@@ -442,10 +458,8 @@ function obtener_inventario_local_completo() {
 function obtener_markup_db($precio_origen, $tipo_cambio) {
     try {
 
-         $iva_multiplicador = 1.16;
-         
-         $otro_factor = 0.96;
- 
+        global $iva_multiplicador, $otro_factor; // <--- AGREGAR $otro_factor AQUÍ
+
         // 1. Convertimos el precio de la API (USD) a moneda local usando el TC de Syscom
         $precio_convertido = (float)$precio_origen * (float)$tipo_cambio * (float)$iva_multiplicador * (float)$otro_factor; // Aplicamos IVA aquí para que el rango considere el precio final con impuestos incluido
 

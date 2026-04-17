@@ -1,5 +1,6 @@
 <?php
 
+
 /**
  * Plugin Name: Gestor de Precios INTRAX (Versión Ultra-Precisión)
  * Description: Actualización masiva con SQL directo. Fórmula corregida: costo × (1 + margen/100).
@@ -47,7 +48,7 @@ function intrax_render_price_manager() {
 
 
 				$multiplier_publico     = number_format(1 + (floatval($row['venta_publico']) / 100), 4, '.', '');
-				$multiplier_integrador  = number_format(1 + (floatval($row['descuento_integrador']) / 100), 4, '.', '');
+				$multiplier_integrador  = number_format(1 + (floatval($row['integrador']) / 100), 4, '.', '');
 
 				$id = intval($row['id']);
 
@@ -302,7 +303,7 @@ function intrax_render_price_manager() {
                 'min' => number_format((float)$row['desde'], 2, '.', ''),
                 'max' => number_format((float)$row['hasta'], 2, '.', ''),
                 'venta_publico'        => number_format(((float)$row['venta_publico'] - 1) * 100, 2, '.', ''),
-                'descuento_integrador' => number_format(((float)$row['descuento_integrador'] - 1) * 100, 2, '.', ''),
+                'descuento_integrador' => number_format(((float)$row['integrador'] - 1) * 100, 2, '.', ''),
             ];
         }
     } else {
