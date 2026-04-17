@@ -1,4 +1,4 @@
-<?php
+ <?php
 
 /**
  * Plugin Name: Gestor de Precios INTRAX (Versión Ultra-Precisión)
@@ -24,6 +24,7 @@ function intrax_render_price_manager() {
 	$iva_multiplicador = 1.16;
 	$otro_factor = 0.96;
 	$reporte_agrupado = []; // Usaremos esta variable para acumular todo
+	$total_productos_tocados = 0;
 
 
     // --- PROCESAR ELIMINACIÓN ---
@@ -47,7 +48,7 @@ function intrax_render_price_manager() {
 
 
 				$multiplier_publico     = number_format(1 + (floatval($row['venta_publico']) / 100), 4, '.', '');
-				$multiplier_integrador  = number_format(1 + (floatval($row['descuento_integrador']) / 100), 4, '.', '');
+				$multiplier_integrador  = number_format(1 + (floatval($row['integrador']) / 100), 4, '.', '');
 
 				$id = intval($row['id']);
 
@@ -87,19 +88,23 @@ function intrax_render_price_manager() {
 				", $min, $max));
 
 				if ($products_found) {
-					
-					
-					// Extraemos solo los valores de la columna 'sku' del array de objetos
-					$lista_skus = wp_list_pluck($products_found, 'sku');
 
-					// Limpiamos posibles valores vacíos y los unimos por coma
-					$skus_texto = implode(', ', array_filter($lista_skus));
+					// Creamos una lista formateada: "SKU ($Precio)"
+					$detalles_productos = array_map(function($item) {
+						$sku = !empty($item->sku) ? $item->sku : 'Sin SKU';
+						$precio = number_format((float)$item->precio_actual, 2, '.', '');
+						return "{$sku} ($" . $precio . ")";
+					}, $products_found);
+
+					// Unimos todos los productos con comas
+					$skus_y_precios_texto = implode(', ', $detalles_productos);
 
 					$reporte_agrupado['auditoria'][] = [
 						'rango' => "$min - $max",
 						'borradores_encontrados' => count($products_found),
-						'skus_detectados' => $skus_texto // Aquí se guardan los nombres de los productos/modelos
+						'skus_detectados' => $skus_y_precios_texto // Ahora guarda: SKU1 ($100.00), SKU2 ($150.00)...
 					];
+					
 					
 					foreach ($price_updates as $key => $current_multiplier) {
 						
@@ -156,11 +161,12 @@ function intrax_render_price_manager() {
 
 													$precio_base = floatval($item['precios']['precio_descuento']);
 
+													$precio_convertido = $precio_base * $iva_multiplicador * $otro_factor * $tipo_cambio;
+
 													$precio_final = $precio_base * $iva_multiplicador * $otro_factor * $current_multiplier * $tipo_cambio;
- 													
-													$precio_final_a_tienda = number_format($precio_final, 2, '.', '');
 													
 													$precio_descuento = $precio_final; 
+
 													$encontrado_exacto = true;
 
 													$reporte_update[] = [
@@ -171,11 +177,10 @@ function intrax_render_price_manager() {
 														'IVA' => $iva_multiplicador,
 														'OTRO FACTOR' => $otro_factor,
 														'Porcentaje' => $current_multiplier,
-														'Precio FINAL' => $precio_final_a_tienda,
+														'Precio Convertido' => $precio_convertido,
+														'Precio FINAL' => $precio_final,
 														'Resultado' => 'Actualizado ✅'
 													];
-													
-													
 													
 													
 													break;								
@@ -282,7 +287,23 @@ function intrax_render_price_manager() {
 			}
 
             wp_cache_flush();
-        echo '<div class="updated notice is-dismissible"><p>🚀 <strong>Éxito:</strong> Se actualizaron <strong>' . $total_productos_tocados . '</strong> productos sin redondeos.</p>		</div>';
+			
+			
+			if ($total_productos_tocados == 0) {
+				 echo '<div class="updated notice is-dismissible"><p><strong>NO SE ACTUALIZÓ PRECIOS en ningun producto</strong></p></div>';
+				
+			}
+			
+			if ($total_productos_tocados > 0) {
+				 echo '<div class="updated notice is-dismissible"><p><strong>SI SE ACTUALIZÓ PRECIOS en: '  . $total_productos_tocados .  ' productos</strong></p></div>';
+				
+			}
+			
+			
+			
+			
+			
+        // echo '<div class="updated notice is-dismissible"><p>🚀 <strong>Éxito:</strong> Se actualizaron <strong>' . $total_productos_tocados . '</strong> productos sin redondeos.</p></div>';
         
 		}
 		
@@ -302,7 +323,7 @@ function intrax_render_price_manager() {
                 'min' => number_format((float)$row['desde'], 2, '.', ''),
                 'max' => number_format((float)$row['hasta'], 2, '.', ''),
                 'venta_publico'        => number_format(((float)$row['venta_publico'] - 1) * 100, 2, '.', ''),
-                'descuento_integrador' => number_format(((float)$row['descuento_integrador'] - 1) * 100, 2, '.', ''),
+                'descuento_integrador' => number_format(((float)$row['integrador'] - 1) * 100, 2, '.', ''),
             ];
         }
     } else {
